@@ -137,7 +137,7 @@ SUPABASE_ANON_KEY=
 LLM_API_KEY=
 ```
 
-## Repo structure (planned)
+## Repo structure 
 
 ```
 schemata/
@@ -151,9 +151,6 @@ schemata/
 
 ## Team
 
-- Matthew Moser, Penn State Electrical Engineering
-- *Teammate name*
+- Matthew Moser
+- Denis Hoxhaj
 
-## License
-
-MIT
