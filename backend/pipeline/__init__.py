@@ -3,10 +3,9 @@
   - dag.py       Dag / Step: steps declare inputs & outputs; edges are derived.
   - hashing.py    file hashing + PipelineState: what changed since the last run.
   - executor.py   Executor: runs stale steps, skips fresh ones, tracks timing.
-  - demo.py       the concrete clean -> analyze -> figures demo pipeline.
 
-The generated clean.py from the merger becomes the first step automatically
-(see demo.ensure_clean_script).
+Projects build their concrete DAG (clean -> summary/charts/scripts) in
+backend/project_pipeline.py; the generated clean.py is always step one.
 """
 
 from .dag import Dag, DagError, Step

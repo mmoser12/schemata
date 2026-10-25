@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -10,12 +9,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pipeline import demo as pipeline_demo  # noqa: E402
+import project_pipeline as pp  # noqa: E402
 from pipeline.dag import Dag, DagError, Step  # noqa: E402
 from pipeline.executor import Executor  # noqa: E402
 from pipeline.hashing import file_hash  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -195,30 +193,48 @@ def test_executor_stops_on_failure(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Integration: the real demo pipeline (clean -> analyze -> figures), on a
-# throwaway copy so it never touches the real sample_data/output.
+# Project pipelines: clean -> configured steps, built from pipeline.json
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def demo_root(tmp_path_factory):
-    root = tmp_path_factory.mktemp("demo_pipeline")
-    shutil.copytree(REPO_ROOT / "sample_data", root / "sample_data",
-                     ignore=shutil.ignore_patterns("make_sample_data.py"))
-    shutil.copytree(REPO_ROOT / "backend" / "pipeline_steps", root / "backend" / "pipeline_steps")
-    return root
+TARGETS = {
+    "timestamp": {"kind": "datetime"},
+    "temperature": {"kind": "quantity", "unit": "degC"},
+    "ph": {"kind": "number"},
+    "notes": {"kind": "text"},
+}
 
 
-def test_demo_pipeline_end_to_end(demo_root):
-    pipeline_demo.ensure_clean_script(demo_root)
-    dag = pipeline_demo.build_demo_dag(demo_root)
-    ex = Executor(dag, workdir=demo_root, state_path=pipeline_demo.state_path(demo_root))
+def test_project_dag_shape(tmp_path):
+    steps = pp.validate_steps(pp.default_steps(TARGETS, sample=True), TARGETS, tmp_path)
+    dag = pp.build_dag(tmp_path, steps, TARGETS)
+    assert dag.topo_order() == ["clean", "summary", "temp_by_file", "temperature_over_time"]
+    assert set(dag.children("clean")) == {"summary", "temp_by_file", "temperature_over_time"}
+    params = (tmp_path / "steps" / "temperature_over_time.json").read_text()
+    assert '"x_is_time": true' in params and '"_code"' in params
 
-    r1 = ex.run()
-    assert r1.ran == ["clean", "analyze", "figures"]
-    assert (demo_root / "backend" / "output" / "merged.csv").exists()
-    assert (demo_root / "backend" / "output" / "summary.csv").exists()
-    assert (demo_root / "backend" / "output" / "figures" / "temp_by_file.png").exists()
-    assert (demo_root / "backend" / "output" / "figures" / "timeseries.png").exists()
 
-    r2 = ex.run()  # nothing changed -> fully cached
-    assert r2.ran == []
+def test_step_validation_rejects_bad_steps(tmp_path):
+    bad = [
+        [{"name": "clean", "kind": "summary"}],
+        [{"name": "a", "kind": "chart", "params": {"chart": "bar", "y": "notes"}}],
+        [{"name": "a", "kind": "chart", "params": {"chart": "pie", "y": "ph"}}],
+        [{"name": "a", "kind": "script", "params": {"script": "missing.py", "outputs": ["output/a.csv"]}}],
+        [{"name": "a", "kind": "summary"}, {"name": "a", "kind": "summary"}],
+    ]
+    for steps in bad:
+        with pytest.raises(pp.StepError):
+            pp.validate_steps(steps, TARGETS, tmp_path)
+
+    (tmp_path / "fit.py").write_text("print('hi')")
+    for outputs in (["../escape.csv"], ["output/merged.csv"], ["/etc/x"], ["elsewhere.csv"]):
+        with pytest.raises(pp.StepError):
+            pp.validate_steps([{"name": "fit", "kind": "script",
+                                "params": {"script": "fit.py", "outputs": outputs}}], TARGETS, tmp_path)
+
+
+def test_removed_step_params_are_cleaned_up(tmp_path):
+    steps = pp.validate_steps([{"name": "s1", "kind": "summary"}, {"name": "s2", "kind": "summary"}],
+                              TARGETS, tmp_path)
+    pp.build_dag(tmp_path, steps, TARGETS)
+    pp.build_dag(tmp_path, steps[:1], TARGETS)
+    assert sorted(f.name for f in (tmp_path / "steps").iterdir()) == ["s1.json"]

@@ -20,13 +20,32 @@ from .dag import Step, is_glob, norm
 _CHUNK = 1 << 20  # 1 MiB
 
 
+# (path, mtime_ns, size) -> sha256. Status polls hash every input; unchanged
+# files are answered from here instead of being re-read. Like git, we only
+# trust the cache for files whose mtime is safely in the past: a same-size
+# rewrite within the filesystem's timestamp granularity would otherwise look
+# unchanged.
+_RACY_NS = 2_000_000_000
+_HASH_CACHE: dict[tuple[str, int, int], str] = {}
+
+
 def file_hash(path: Path) -> str:
     """sha256 of a file's bytes, streamed so large files don't blow up memory."""
+    st = Path(path).stat()
+    key = (str(Path(path).resolve()), st.st_mtime_ns, st.st_size)
+    cached = _HASH_CACHE.get(key)
+    if cached is not None:
+        return cached
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(_CHUNK):
             h.update(chunk)
-    return h.hexdigest()
+    digest = h.hexdigest()
+    if time.time_ns() - st.st_mtime_ns > _RACY_NS:
+        if len(_HASH_CACHE) > 10_000:
+            _HASH_CACHE.clear()
+        _HASH_CACHE[key] = digest
+    return digest
 
 
 def resolve_paths(pattern: str, workdir: Path) -> list[Path]:

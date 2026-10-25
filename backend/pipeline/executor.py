@@ -18,7 +18,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .dag import Dag
 from .hashing import (
@@ -100,10 +100,12 @@ class Executor:
     def _load(self) -> PipelineState:
         return PipelineState.load(self.state_path)
 
-    def run(self, force: bool = False, only: Optional[list[str]] = None) -> ExecutionReport:
+    def run(self, force: bool = False, only: Optional[list[str]] = None,
+            on_step: Optional[Callable[[str], None]] = None, env: Optional[dict] = None) -> ExecutionReport:
         """Run the pipeline. `force` reruns every step (a "full" run, for timing
         comparisons). `only` limits which steps are even considered -- their
-        upstream dependencies still run first if they're stale."""
+        upstream dependencies still run first if they're stale. `on_step` is
+        called with a step's name just before it executes (progress display)."""
         state = self._load()
         order = self.dag.topo_order()
         if only is not None:
@@ -120,8 +122,10 @@ class Executor:
                 results.append(RunResult(name, ran=False, reason=reason))
                 continue
 
+            if on_step is not None:
+                on_step(name)
             t0 = time.time()
-            proc = subprocess.run(step.argv(), cwd=self.workdir, capture_output=True, text=True)
+            proc = subprocess.run(step.argv(), cwd=self.workdir, capture_output=True, text=True, env=env)
             duration = time.time() - t0
 
             new_record = StepRecord(

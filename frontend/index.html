@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Schemata</title>
+  <meta name="description" content="Merge messy lab spreadsheets, generate the cleaning script, and re-run only what changed.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/" aria-label="Schemata home">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h7v4H4zM13 14h7v4h-7zM11 8h3a2 2 0 0 1 2 2v4" /></svg>
+        <span>Schemata</span>
+      </a>
+      <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="help-btn" type="button" aria-label="Help and keyboard shortcuts" title="Help (?)"></button>
+        <button class="icon-btn" id="theme-btn" type="button" aria-label="Change theme" title="Theme"></button>
+      </div>
+    </div>
+  </header>
+  <main id="main" tabindex="-1"></main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <noscript><p class="noscript">Schemata needs JavaScript enabled to run.</p></noscript>
+</body>
+</html>

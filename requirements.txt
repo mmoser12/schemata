@@ -1,0 +1,31 @@
+# Schemata runtime dependencies, pinned to the exact versions it is tested with.
+# Direct dependencies are marked; everything else is what they pull in.
+# Install:  python -m pip install -r requirements.txt   (Python 3.12+)
+
+fastapi==0.162.0          # direct: web API
+uvicorn==0.54.0           # direct: web server
+python-multipart==0.0.32  # direct: file uploads
+pandas==3.1.0             # direct: reading and merging tables
+numpy==2.5.4              # direct: numeric work
+Pint==0.26.2              # direct: unit parsing and conversion
+openpyxl==3.1.5           # direct: Excel files
+
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+click==8.5.0
+et_xmlfile==2.0.0
+flexcache==0.3
+flexparser==0.4
+h11==0.16.0
+idna==3.20
+opentelemetry-api==1.45.1
+platformdirs==4.13.5
+pydantic==2.14.1
+pydantic_core==2.50.1
+python-dateutil==3.0.0
+six==1.17.0
+starlette==1.10.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.5

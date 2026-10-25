@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .units import UNIT_TOKENS
+from .units import token_to_unit
 
 # "Temp (C)", "Mass [mg]", "Pressure {kPa}"
 _BRACKET_UNIT = re.compile(r"^(?P<name>.*?)\s*[\(\[\{]\s*(?P<unit>[^\)\]\}]+?)\s*[\)\]\}]\s*$")
@@ -21,7 +21,7 @@ _BRACKET_UNIT = re.compile(r"^(?P<name>.*?)\s*[\(\[\{]\s*(?P<unit>[^\)\]\}]+?)\s
 
 def normalize_name(name: str) -> str:
     """'Sample_ID ' -> 'sample id'."""
-    name = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(name))  # SampleID -> Sample ID
+    name = re.sub(r"([a-z]{2,})([A-Z])", r"\1 \2", str(name))  # SampleID -> Sample ID, but pH stays
     name = re.sub(r"[^0-9a-zA-Z]+", " ", name)
     return " ".join(name.lower().split())
 
@@ -29,17 +29,20 @@ def normalize_name(name: str) -> str:
 def split_header(raw: str) -> tuple[str, Optional[str]]:
     """Split a raw header into (normalized name, unit token or None).
 
-    'Temp (C)' -> ('temp', 'c'); 'temperature_K' -> ('temperature', 'k'); 'Date' -> ('date', None)
+    The unit token keeps its case, because case matters for units (mM vs mm).
+    'Temp (C)' -> ('temp', 'C'); 'temperature_K' -> ('temperature', 'K'); 'Date' -> ('date', None)
     """
     raw = str(raw).strip()
     m = _BRACKET_UNIT.match(raw)
-    if m and m.group("unit").strip().lower().replace(" ", "") in UNIT_TOKENS:
-        return normalize_name(m.group("name")), m.group("unit").strip().lower().replace(" ", "")
+    if m:
+        token = m.group("unit").strip().replace(" ", "")
+        if token_to_unit(token) is not None:
+            return normalize_name(m.group("name")), token
 
     # Trailing unit after a separator: temperature_K, mass-g, P_kPa
     parts = re.split(r"[_\-\s]+", raw)
-    if len(parts) >= 2 and parts[-1].lower() in UNIT_TOKENS:
-        return normalize_name(" ".join(parts[:-1])), parts[-1].lower()
+    if len(parts) >= 2 and token_to_unit(parts[-1]) is not None:
+        return normalize_name(" ".join(parts[:-1])), parts[-1]
 
     return normalize_name(raw), None
 

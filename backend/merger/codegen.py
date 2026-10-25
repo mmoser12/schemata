@@ -2,21 +2,39 @@
 
 The script only needs pandas (plus openpyxl for Excel inputs). Unit conversions
 are written out as plain linear formulas with a comment saying where they came
-from, so a reviewer can read exactly what happened to every column.
+from, so a reviewer can read exactly what happened to every column. The file
+readers are copied from merger/readers.py, so the script reads each file with
+exactly the options the app detected.
+
+Only the first line (the "generated on" stamp) changes between two scripts
+generated from the same plan; see same_script().
 """
 
 from __future__ import annotations
 
+import inspect
 import re
 from datetime import datetime
 
-from . import units
+from . import readers, units
 from .plan import MergePlan
 
 
-def _func_name(fname: str) -> str:
-    stem = re.sub(r"\.[^.]+$", "", fname)
-    return "load_" + (re.sub(r"\W+", "_", stem).strip("_").lower() or "file")
+def _func_names(files: list[str]) -> list[str]:
+    names, used = [], set()
+    for fname in files:
+        stem = re.sub(r"\.[^.]+$", "", fname)
+        base = "load_" + (re.sub(r"\W+", "_", stem).strip("_").lower() or "file")
+        name, i = base, 2
+        while name in used:
+            name, i = f"{base}_{i}", i + 1
+        used.add(name)
+        names.append(name)
+    return names
+
+
+def _num(v: float) -> str:
+    return repr(float(v)) if abs(v) != float("inf") else f"float({str(v)!r})"
 
 
 def _date_expr(col_expr: str, fmt: str | None) -> str:
@@ -25,6 +43,11 @@ def _date_expr(col_expr: str, fmt: str | None) -> str:
     if fmt == "native":
         return f"pd.to_datetime({col_expr}, errors='coerce')"
     return f"pd.to_datetime({col_expr}.astype('string').str.strip(), format={fmt!r}, errors='coerce')"
+
+
+def same_script(a: str, b: str) -> bool:
+    """True when two generated scripts differ only in their timestamp line."""
+    return a.split("\n", 1)[-1] == b.split("\n", 1)[-1]
 
 
 def generate_clean_script(plan: MergePlan) -> str:
@@ -39,7 +62,12 @@ def generate_clean_script(plan: MergePlan) -> str:
         unit = f" [{spec['unit']}]" if spec.get("unit") else ""
         w(f"    {t}{unit}")
     w("")
+    w("Raw files:")
+    for fp in plan.files:
+        w(f"    {fp.file}  ({readers.describe_options(fp.read_options)})")
+    w("")
     w("Usage:  python clean.py [DATA_DIR] [OUTPUT_CSV]")
+    w("Needs:  pandas (and openpyxl for Excel files)")
     w('"""')
     w("")
     w("import sys")
@@ -53,20 +81,17 @@ def generate_clean_script(plan: MergePlan) -> str:
     w(f"COLUMNS = {['source_file', *targets]!r}")
     w("")
     w("")
-    w("def read(name):")
-    w("    path = DATA_DIR / name")
-    w("    if path.suffix.lower() in {'.xlsx', '.xlsm', '.xls'}:")
-    w("        return pd.read_excel(path)")
-    w("    return pd.read_csv(path)")
+    w(inspect.getsource(readers.tidy).rstrip())
+    w("")
+    w("")
+    w(inspect.getsource(readers.read_file).rstrip())
 
-    func_names = []
-    for fp in plan.files:
-        fn = _func_name(fp.file)
-        func_names.append(fn)
+    func_names = _func_names([fp.file for fp in plan.files])
+    for fp, fn in zip(plan.files, func_names):
         w("")
         w("")
         w(f"def {fn}():")
-        w(f"    src = read({fp.file!r})")
+        w(f"    src = read_file(DATA_DIR / {fp.file!r}, {fp.read_options!r})")
         w("    out = pd.DataFrame(index=src.index)")
         w(f"    out['source_file'] = {fp.file!r}")
         for target, spec in targets.items():
@@ -88,6 +113,8 @@ def generate_clean_script(plan: MergePlan) -> str:
                 if abs(b) > 1e-12:
                     expr += f" - {-b!r}" if b < 0 else f" + {b!r}"
                 w(f"    out[{target!r}] = {expr}")
+            elif spec["kind"] == "number":
+                w(f"    out[{target!r}] = pd.to_numeric({col}, errors='coerce')")
             elif spec["kind"] == "datetime":
                 if m.date_note:
                     w(f"    # {m.date_note}")
@@ -110,11 +137,13 @@ def generate_clean_script(plan: MergePlan) -> str:
         elif spec["kind"] == "datetime":
             w(f"    if df[{target!r}].isna().any():")
             w(f"        warnings.append(str(df[{target!r}].isna().sum()) + ' unparsed {target} value(s)')")
-        elif spec["kind"] == "quantity" and "valid_range" in spec:
+        elif spec["kind"] in ("quantity", "number") and spec.get("valid_range"):
             lo, hi = spec["valid_range"]
-            w(f"    bad = df[(df[{target!r}] < {lo!r}) | (df[{target!r}] > {hi!r})]")
+            unit = f" {spec['unit']}" if spec.get("unit") else ""
+            w(f"    values = pd.to_numeric(df[{target!r}], errors='coerce')")
+            w(f"    bad = df[(values < {_num(lo)}) | (values > {_num(hi)})]")
             w("    if len(bad):")
-            w(f"        errors.append(str(len(bad)) + ' {target} value(s) outside {lo}..{hi} {spec['unit']}')")
+            w(f"        errors.append(str(len(bad)) + ' {target} value(s) outside {lo:g}..{hi:g}{unit}')")
     w("    for msg in warnings:")
     w("        print('WARNING:', msg)")
     w("    if errors:")
@@ -122,12 +151,16 @@ def generate_clean_script(plan: MergePlan) -> str:
     w("")
     w("")
     w("def main():")
-    w("    df = pd.concat([")
-    for fn in func_names:
-        w(f"        {fn}(),")
-    w("    ], ignore_index=True)")
+    if func_names:
+        w("    df = pd.concat([")
+        for fn in func_names:
+            w(f"        {fn}(),")
+        w("    ], ignore_index=True)")
+    else:
+        w("    df = pd.DataFrame(columns=COLUMNS)")
     w("    check(df)")
-    w("    df.to_csv(OUTPUT, index=False)")
+    w("    OUTPUT.parent.mkdir(parents=True, exist_ok=True)")
+    w("    df.to_csv(OUTPUT, index=False, float_format='%.12g')  # 12 significant digits: no 2.0846999999999998")
     w("    print(f'Wrote {len(df)} rows to {OUTPUT}')")
     w("")
     w("")
